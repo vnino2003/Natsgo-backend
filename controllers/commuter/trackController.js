@@ -88,9 +88,22 @@ exports.getLiveAssignedBuses = async (req, res) => {
         ON tt.terminal_id = bts.target_terminal_id
 
       WHERE b.device_id IS NOT NULL
+
+        -- ✅ device must be online + recently seen
         AND d.status = 'online'
         AND d.last_seen_at IS NOT NULL
         AND TIMESTAMPDIFF(SECOND, d.last_seen_at, NOW()) <= ?
+
+        -- ✅ ONLY show buses with GPS ACTIVE (hide searching/disconnected/disabled)
+        AND LOWER(COALESCE(d.gps_state, '')) = 'active'
+
+        -- ✅ bus must be “okay/active”
+        -- If your bus_status values are different, adjust this list.
+        AND LOWER(COALESCE(b.bus_status, 'active')) IN ('active', 'online', 'in_service')
+
+        -- ✅ must have coordinates
+        AND g.lat IS NOT NULL
+        AND g.lng IS NOT NULL
 
       ORDER BY b.id ASC
       `,

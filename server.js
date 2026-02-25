@@ -15,9 +15,14 @@ app.get("/", (req, res) => {
 const gpsRoutes = require("./routes/gpsRoutes");
 const deviceRoutes = require("./routes/admin/deviceRoutes");
 const busRoutes = require("./routes/admin/busRoutes");
+const liveTrackRoutes = require("./routes/admin/liveTrackRoutes");
 const busAssignmentRoutes = require("./routes/busAssignmentRoutes");
 const trackRoutes = require("./routes/trackRoutes");
 const terminalRoutes = require("./routes/terminalRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const terminalStateRoutes = require("./routes/admin/terminalStateRoutes");
+
+const { startOfflineDevicesCron } = require("./jobs/offlineDevicesJob");
 
 // ESP32 telemetry (public/internal)
 app.use("/api/gps", gpsRoutes);
@@ -28,6 +33,12 @@ app.use("/api/admin/buses", busRoutes);
 app.use("/api/admin/bus-assignments", busAssignmentRoutes);
 app.use("/api/track", trackRoutes);
 app.use("/api/admin/terminals", terminalRoutes);
+app.use("/api/admin/notifications", notificationRoutes);
+app.use("/api/admin/track", liveTrackRoutes);
+app.use("/api/admin/terminal-state", terminalStateRoutes);
+
+
+startOfflineDevicesCron();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Backend running at http://localhost:${PORT}`));

@@ -1,5 +1,14 @@
 // controllers/gpsController.js
 const db = require("../db");
+const {
+  CATEGORY,
+  SEVERITY,
+  AUDIENCE,
+  ENTITY,
+  upsertActiveAlert,
+  resolveActiveAlert,
+  createNotification,
+} = require("../services/notificationHelper");
 
 /* ================= Helpers ================= */
 function toNum(v) {
@@ -14,27 +23,42 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function haversineMeters(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
+/**
+ * Normalize any incoming gps_state to match ENUM('active','searching','disconnected','disabled')
+ * Returns allowed values OR null (do not update).
+ */
+function normalizeGpsState(v, { gpsEnabledVal, latNum, lngNum } = {}) {
+  if (v === null || v === undefined || v === "") return null;
+  const s = String(v).trim().toLowerCase();
 
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
+  if (["active", "searching", "disconnected", "disabled"].includes(s)) return s;
 
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  if (s === "ok") return "active";
+  if (s === "no_fix" || s === "nofix" || s === "no-fix") return "searching";
+  if (s === "stale") return "disconnected";
+  if (s === "offline") return "disconnected";
 
-  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  if (s === "unknown" || s === "n/a") {
+    if (gpsEnabledVal === 0) return "disabled";
+    const hasFix = latNum !== null && lngNum !== null;
+    return hasFix ? "active" : "searching";
+  }
+
+  return null;
 }
 
 /* =========================================================
    POST /api/gps/telemetry
    - updates device last_seen
+   - sets device status='online' on every telemetry ✅
    - upserts gps_logs (1 row per device)
    - upserts ir_status (if present)
-   - ✅ updates bus_terminal_state (nearest terminal + at_terminal)
-   ========================================================= */
+   - ✅ notifications:
+        - resolve DEVICE_OFFLINE when telemetry returns + create DEVICE_ONLINE
+        - upsert GPS_DISCONNECTED while disconnected
+        - resolve GPS_DISCONNECTED when recovered + create GPS_ACTIVE/GPS_SEARCHING
+   - ❌ REMOVED: Terminal proximity + bus_terminal_state updates
+========================================================= */
 async function postTelemetry(req, res) {
   const {
     device_code,
@@ -74,6 +98,15 @@ async function postTelemetry(req, res) {
         ? 0
         : 1;
 
+  const latNum = toNum(lat);
+  const lngNum = toNum(lng);
+
+  const gpsStateNorm = normalizeGpsState(gps_state, {
+    gpsEnabledVal,
+    latNum,
+    lngNum,
+  });
+
   const conn = await db.getConnection();
 
   try {
@@ -98,29 +131,33 @@ async function postTelemetry(req, res) {
       deviceRow = rows[0] || null;
     }
 
+    const prevGpsState = deviceRow ? deviceRow.gps_state : null;
+    const prevStatus = deviceRow ? deviceRow.status : null;
+
     /* ===== 2) Insert device if missing, else update last_seen ===== */
     const now = new Date();
     let deviceId;
 
     if (!deviceRow) {
+      const gpsStateForInsert = gpsStateNorm || (gpsEnabledVal ? "searching" : "disabled");
+
       const [ins] = await conn.execute(
         `
         INSERT INTO iot_devices
-          (device_code, esp32_id, gps_enabled, gps_state, ir_enabled, last_seen_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+          (device_code, esp32_id, gps_enabled, gps_state, ir_enabled, status, last_seen_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'online', ?, NOW(), NOW())
         `,
         [
           device_code || `DEV-${Date.now()}`,
           esp32_id || null,
           gpsEnabledVal,
-          gps_state || "unknown",
+          gpsStateForInsert,
           irEnabledVal ?? 1,
           now,
         ]
       );
-      deviceId = ins.insertId;
 
-      // create default ir_status row
+      deviceId = ins.insertId;
       await conn.execute(`INSERT INTO ir_status (device_id) VALUES (?)`, [deviceId]);
     } else {
       deviceId = deviceRow.id;
@@ -132,18 +169,101 @@ async function postTelemetry(req, res) {
             gps_enabled = ?,
             gps_state = COALESCE(?, gps_state),
             ir_enabled = COALESCE(?, ir_enabled),
+            status = 'online',
             last_seen_at = ?,
             updated_at = NOW()
         WHERE id = ?
         `,
-        [esp32_id || null, gpsEnabledVal, gps_state || null, irEnabledVal, now, deviceId]
+        [esp32_id || null, gpsEnabledVal, gpsStateNorm, irEnabledVal, now, deviceId]
       );
     }
 
-    /* ===== 3) Upsert gps_logs (1 row per device) ===== */
-    const latNum = toNum(lat);
-    const lngNum = toNum(lng);
+    // final gps state we consider AFTER update
+    const nextGpsState =
+      gpsStateNorm ||
+      (deviceRow ? deviceRow.gps_state : (gpsEnabledVal ? "searching" : "disabled"));
 
+    // keys for dedupe alerts
+    const offlineKey = `device_offline:${deviceId}`;
+    const gpsDiscKey = `gps_disconnected:${deviceId}`;
+    const label = device_code || esp32_id || `Device#${deviceId}`;
+
+    /* ===== 2.5) Resolve offline when telemetry returns + create online event ===== */
+    if (prevStatus === "offline") {
+      await resolveActiveAlert(offlineKey, { conn });
+
+      await createNotification({
+        conn,
+        category: CATEGORY.IOT,
+        type: "DEVICE_ONLINE",
+        severity: SEVERITY.INFO,
+        audience: AUDIENCE.ADMIN,
+        title: "Device back online",
+        message: `${label} is online again.`,
+        entity_type: ENTITY.DEVICE,
+        entity_id: deviceId,
+        active: 0,
+        unread: 1,
+        meta: { from: "offline", to: "online" },
+      });
+    }
+
+    /* ===== 2.6) GPS disconnected alert + recovery event ===== */
+    const wasDisconnected = prevGpsState === "disconnected";
+    const isDisconnected = nextGpsState === "disconnected";
+
+    if (gpsEnabledVal === 1) {
+      if (isDisconnected) {
+        // keep active alert while disconnected
+        await upsertActiveAlert({
+          conn,
+          dedupe_key: gpsDiscKey,
+          category: CATEGORY.IOT,
+          type: "GPS_DISCONNECTED",
+          severity: SEVERITY.WARNING,
+          audience: AUDIENCE.ADMIN,
+          title: "GPS disconnected",
+          message: `${label} GPS is disconnected.`,
+          entity_type: ENTITY.DEVICE,
+          entity_id: deviceId,
+          meta: { gps_state: nextGpsState },
+        });
+      } else {
+        // recovered from disconnected
+        if (wasDisconnected) {
+          await resolveActiveAlert(gpsDiscKey, { conn });
+
+          const recoveredType = nextGpsState === "active" ? "GPS_ACTIVE" : "GPS_SEARCHING";
+          const recoveredTitle = nextGpsState === "active" ? "GPS active" : "GPS searching";
+          const recoveredMsg =
+            nextGpsState === "active"
+              ? `${label} GPS is active again.`
+              : `${label} GPS reconnected but still searching for fix.`;
+
+          await createNotification({
+            conn,
+            category: CATEGORY.IOT,
+            type: recoveredType,
+            severity: SEVERITY.INFO,
+            audience: AUDIENCE.ADMIN,
+            title: recoveredTitle,
+            message: recoveredMsg,
+            entity_type: ENTITY.DEVICE,
+            entity_id: deviceId,
+            active: 0,
+            unread: 1,
+            meta: { from: "disconnected", to: nextGpsState },
+          });
+        }
+      }
+    } else {
+      // gps disabled: ensure we don't keep old alert
+      if (wasDisconnected) {
+        await resolveActiveAlert(gpsDiscKey, { conn });
+      }
+    }
+
+    /* ===== 3) Upsert gps_logs (1 row per device) ===== */
     if (deviceId && latNum !== null && lngNum !== null) {
       await conn.execute(
         `
@@ -217,78 +337,6 @@ async function postTelemetry(req, res) {
             updated_at      = NOW()
           `,
           [deviceId, pc, inT, outT, le, last_event_at || null]
-        );
-      }
-    }
-
-    /* ===== 5) ✅ Terminal proximity (GPS → bus_terminal_state) ===== */
-    // arrival / depart radiuses (adjust for your place)
-    const ARRIVAL_RADIUS_M = 120;
-    const DEPART_RADIUS_M = 180;
-
-    if (deviceId && latNum !== null && lngNum !== null) {
-      const [terms] = await conn.execute(
-        `SELECT terminal_id, lat, lng FROM terminals WHERE is_active = 1`
-      );
-
-      if (terms.length) {
-        let nearest = null;
-        let best = Infinity;
-
-        for (const t of terms) {
-          const d = haversineMeters(
-            latNum,
-            lngNum,
-            Number(t.lat),
-            Number(t.lng)
-          );
-          if (d < best) {
-            best = d;
-            nearest = t;
-          }
-        }
-
-        const [prevRows] = await conn.execute(
-          `SELECT at_terminal, current_terminal_id FROM bus_terminal_state WHERE device_id = ? LIMIT 1`,
-          [deviceId]
-        );
-        const prev = prevRows[0] || null;
-
-        const wasAt = prev ? Number(prev.at_terminal) === 1 : false;
-
-        let at_terminal = 0;
-        let current_terminal_id = null;
-
-        if (!wasAt) {
-          // arrive rule
-          if (best <= ARRIVAL_RADIUS_M && nearest) {
-            at_terminal = 1;
-            current_terminal_id = nearest.terminal_id;
-          }
-        } else {
-          // stay until depart radius exceeded
-          if (best <= DEPART_RADIUS_M) {
-            at_terminal = 1;
-            current_terminal_id = prev.current_terminal_id;
-          } else {
-            at_terminal = 0;
-            current_terminal_id = null;
-          }
-        }
-
-        await conn.execute(
-          `
-          INSERT INTO bus_terminal_state
-            (device_id, current_terminal_id, at_terminal, dist_m, last_seen_at)
-          VALUES (?, ?, ?, ?, NOW())
-          ON DUPLICATE KEY UPDATE
-            current_terminal_id = VALUES(current_terminal_id),
-            at_terminal = VALUES(at_terminal),
-            dist_m = VALUES(dist_m),
-            last_seen_at = VALUES(last_seen_at),
-            updated_at = NOW()
-          `,
-          [deviceId, current_terminal_id, at_terminal, best]
         );
       }
     }

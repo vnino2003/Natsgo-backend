@@ -1,15 +1,80 @@
 // controllers/deviceController.js
 const db = require("../db");
 
-const OFFLINE_SECONDS = 120;     // device offline if no telemetry within 120s
-const GPS_STALE_SECONDS = 120;   // gps stale if no gps update within 120s
-const IR_STALE_SECONDS = 300;    // IR heartbeat stale (use 300s since events are not constant)
+const OFFLINE_SECONDS = 120;   // device offline if no telemetry within 120s
+const IR_STALE_SECONDS = 300;  // IR stale logic (pwede mong i-keep)
 
 function isFresh(ts, seconds) {
   if (!ts) return false;
   const t = new Date(ts).getTime();
   if (!Number.isFinite(t)) return false;
   return t >= Date.now() - seconds * 1000;
+}
+
+function normalizeGpsState(v) {
+  const s = String(v || "").toLowerCase().trim();
+  // allowed: active | searching | disconnected | disabled (safe extra)
+  if (s === "active" || s === "searching" || s === "disconnected" || s === "disabled") return s;
+  return "searching";
+}
+
+function normalizeIrState(v) {
+  const s = String(v || "").toLowerCase().trim();
+  // allowed: ok | stale | disabled (safe extra)
+  if (s === "ok" || s === "stale" || s === "disabled") return s;
+  return "stale";
+}
+
+/**
+ * Effective states for UI
+ * - ONLINE  => use DB-reported states
+ * - OFFLINE => force gps=disconnected (if enabled), ir=stale (if enabled)
+ */
+function computeEffectiveStates(r) {
+  const isOnline = !!r.is_online_calc;
+
+  // ----- GPS effective state (DB-driven) -----
+  const gpsEnabled = Number(r.gps_enabled) === 1;
+
+  let gps_state_effective = "disabled";
+  if (gpsEnabled) {
+    if (!isOnline) gps_state_effective = "disconnected";
+    else gps_state_effective = normalizeGpsState(r.gps_state_reported);
+  }
+
+  // ----- IR effective state -----
+  const irEnabled = Number(r.ir_enabled) === 1;
+
+  let ir_state_effective = "disabled";
+  if (irEnabled) {
+    if (!isOnline) {
+      ir_state_effective = "stale";
+    } else {
+      // DB-driven
+      ir_state_effective = normalizeIrState(r.ir_state_reported);
+
+      // If you want timestamp-based override, uncomment:
+      // const irFresh = isFresh(r.ir_last_seen_at, IR_STALE_SECONDS);
+      // ir_state_effective = irFresh ? "ok" : "stale";
+    }
+  }
+
+  const status_effective = isOnline ? "online" : "offline";
+
+  const health_state =
+    !isOnline
+      ? "Offline"
+      : (gps_state_effective === "active" && ir_state_effective === "ok")
+        ? "Healthy"
+        : "Warning";
+
+  return {
+    isOnline,
+    status_effective,
+    gps_state_effective,
+    ir_state_effective,
+    health_state,
+  };
 }
 
 // GET /api/admin/devices?new_only=1&new_hours=24
@@ -25,12 +90,13 @@ async function getDevices(req, res) {
         d.device_code,
         d.esp32_id,
 
+        d.status AS status_db,
         d.gps_enabled,
-        d.gps_state,
+        d.gps_state AS gps_state_reported,
         d.last_seen_at,
 
         d.ir_enabled,
-        d.ir_state,
+        d.ir_state AS ir_state_reported,
         d.ir_last_seen_at,
 
         d.created_at,
@@ -51,13 +117,18 @@ async function getDevices(req, res) {
         irs.last_event_at,
         irs.updated_at AS ir_updated_at,
 
+        /* ✅ Assignment (Bus) */
+        b.id AS bus_id,
+        b.bus_code AS bus_code,
+        b.plate_no AS bus_plate_no,
+
         (d.created_at >= (NOW() - INTERVAL ? HOUR)) AS is_new,
         (d.last_seen_at IS NOT NULL AND d.last_seen_at >= (NOW() - INTERVAL ${OFFLINE_SECONDS} SECOND)) AS is_online_calc
       FROM iot_devices d
-      LEFT JOIN gps_logs g
-        ON g.device_id = d.id
-      LEFT JOIN ir_status irs
-        ON irs.device_id = d.id
+      LEFT JOIN gps_logs g ON g.device_id = d.id
+      LEFT JOIN ir_status irs ON irs.device_id = d.id
+      /* ✅ Join bus assignment: buses.device_id points to iot_devices.id */
+      LEFT JOIN buses b ON b.device_id = d.id
       ${newOnly ? "WHERE d.created_at >= (NOW() - INTERVAL ? HOUR)" : ""}
       ORDER BY d.created_at DESC
     `;
@@ -65,61 +136,41 @@ async function getDevices(req, res) {
     const params = newOnly ? [hours, hours] : [hours];
     const [rows] = await db.execute(sql, params);
 
-    const out = rows.map((r) => {
-      const isOnline = !!r.is_online_calc;
-
-      // ----- GPS computed state -----
-      const gpsEnabled = Number(r.gps_enabled) === 1;
-      const hasFix = r.lat !== null && r.lng !== null;
-      const gpsFresh = isFresh(r.gps_recorded_at, GPS_STALE_SECONDS);
-
-      let gps_state = "disabled";
-      if (gpsEnabled) {
-        if (!isOnline) gps_state = "stale";
-        else if (!gpsFresh) gps_state = "stale";
-        else gps_state = hasFix ? "ok" : "no_fix";
-      }
-
-      // ----- IR computed state -----
-      const irEnabled = Number(r.ir_enabled) === 1;
-      const irFresh = isFresh(r.ir_last_seen_at, IR_STALE_SECONDS);
-
-      let ir_state = "disabled";
-      if (irEnabled) {
-        if (!isOnline) ir_state = "stale";
-        else ir_state = irFresh ? "ok" : "stale";
-      }
-
-      // overall status/health
-      const status = isOnline ? "online" : "offline";
-
-      // Example health logic:
-      // - Offline -> Offline
-      // - Online + GPS ok + IR ok -> Healthy
-      // - Online but any stale/no_fix -> Warning
-      const health_state =
-        !isOnline
-          ? "Offline"
-          : (gps_state === "ok" && ir_state === "ok")
-            ? "Healthy"
-            : "Warning";
+    const computed = rows.map((r) => {
+      const {
+        isOnline,
+        status_effective,
+        gps_state_effective,
+        ir_state_effective,
+        health_state,
+      } = computeEffectiveStates(r);
 
       return {
         ...r,
-        status,
+
+        // Effective/UI fields
+        status: status_effective,
         is_online: isOnline,
 
-        gps_state,
-        gps_ok: gps_state === "ok",
+        gps_state: gps_state_effective,
+        gps_ok: gps_state_effective === "active",
 
-        ir_state,
-        ir_ok: ir_state === "ok",
+        ir_state: ir_state_effective,
+        ir_ok: ir_state_effective === "ok",
 
-        health_state
+        health_state,
+
+        // Reported fields
+        gps_state_reported: r.gps_state_reported,
+        ir_state_reported: r.ir_state_reported,
+        status_db: r.status_db,
+
+        // Convenience fields (optional)
+        assignment: r.bus_code || r.bus_plate_no || null,
       };
     });
 
-    return res.json(out);
+    return res.json(computed);
   } catch (err) {
     console.error("getDevices error:", err);
     return res.status(500).json({ message: "Failed to fetch devices", error: err.message });
@@ -135,6 +186,10 @@ async function getDeviceById(req, res) {
       `
       SELECT
         d.*,
+        d.status AS status_db,
+        d.gps_state AS gps_state_reported,
+        d.ir_state AS ir_state_reported,
+
         g.lat,
         g.lng,
         g.speed_kmh,
@@ -148,10 +203,19 @@ async function getDeviceById(req, res) {
         irs.out_total,
         irs.last_event,
         irs.last_event_at,
-        irs.updated_at AS ir_updated_at
+        irs.updated_at AS ir_updated_at,
+
+        /* ✅ Assignment (Bus) */
+        b.id AS bus_id,
+        b.bus_code AS bus_code,
+        b.plate_no AS bus_plate_no,
+
+        (d.last_seen_at IS NOT NULL AND d.last_seen_at >= (NOW() - INTERVAL ${OFFLINE_SECONDS} SECOND)) AS is_online_calc
       FROM iot_devices d
       LEFT JOIN gps_logs g ON g.device_id = d.id
       LEFT JOIN ir_status irs ON irs.device_id = d.id
+      /* ✅ Join bus assignment */
+      LEFT JOIN buses b ON b.device_id = d.id
       WHERE d.id = ?
       LIMIT 1
       `,
@@ -161,44 +225,37 @@ async function getDeviceById(req, res) {
     if (!rows[0]) return res.status(404).json({ message: "Device not found" });
 
     const r = rows[0];
-    const isOnline = isFresh(r.last_seen_at, OFFLINE_SECONDS);
 
-    const gpsEnabled = Number(r.gps_enabled) === 1;
-    const hasFix = r.lat !== null && r.lng !== null;
-    const gpsFresh = isFresh(r.gps_recorded_at, GPS_STALE_SECONDS);
-
-    let gps_state = "disabled";
-    if (gpsEnabled) {
-      if (!isOnline) gps_state = "stale";
-      else if (!gpsFresh) gps_state = "stale";
-      else gps_state = hasFix ? "ok" : "no_fix";
-    }
-
-    const irEnabled = Number(r.ir_enabled) === 1;
-    const irFresh = isFresh(r.ir_last_seen_at, IR_STALE_SECONDS);
-
-    let ir_state = "disabled";
-    if (irEnabled) {
-      if (!isOnline) ir_state = "stale";
-      else ir_state = irFresh ? "ok" : "stale";
-    }
-
-    const status = isOnline ? "online" : "offline";
-    const health_state =
-      !isOnline ? "Offline" : (gps_state === "ok" && ir_state === "ok") ? "Healthy" : "Warning";
+    const {
+      isOnline,
+      status_effective,
+      gps_state_effective,
+      ir_state_effective,
+      health_state,
+    } = computeEffectiveStates(r);
 
     return res.json({
       ...r,
-      status,
+
+      // Effective/UI fields
+      status: status_effective,
       is_online: isOnline,
 
-      gps_state,
-      gps_ok: gps_state === "ok",
+      gps_state: gps_state_effective,
+      gps_ok: gps_state_effective === "active",
 
-      ir_state,
-      ir_ok: ir_state === "ok",
+      ir_state: ir_state_effective,
+      ir_ok: ir_state_effective === "ok",
 
-      health_state
+      health_state,
+
+      // Reported fields
+      gps_state_reported: r.gps_state_reported,
+      ir_state_reported: r.ir_state_reported,
+      status_db: r.status_db,
+
+      // Convenience
+      assignment: r.bus_code || r.bus_plate_no || null,
     });
   } catch (err) {
     console.error("getDeviceById error:", err);
