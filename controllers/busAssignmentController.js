@@ -166,7 +166,6 @@ async function getCurrentAssignments(req, res) {
         b.bus_code,
         b.plate_no,
         b.capacity,
-        b.bus_status,
 
         b.device_id,
 

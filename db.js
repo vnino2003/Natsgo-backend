@@ -1,14 +1,6 @@
 const mysql = require("mysql2/promise");
 require("dotenv").config();
-console.log("[DB ENV]", {
-  MYSQLHOST: process.env.MYSQLHOST,
-  MYSQLPORT: process.env.MYSQLPORT,
-  MYSQLUSER: process.env.MYSQLUSER,
-  MYSQLDATABASE: process.env.MYSQLDATABASE,
-  hasPass: !!process.env.MYSQLPASSWORD,
-  MYSQL_URL: !!process.env.MYSQL_URL,
-  MYSQL_PUBLIC_URL: !!process.env.MYSQL_PUBLIC_URL,
-});
+
 const pool = mysql.createPool({
   host: process.env.MYSQLHOST || process.env.DB_HOST,
   user: process.env.MYSQLUSER || process.env.DB_USER,
