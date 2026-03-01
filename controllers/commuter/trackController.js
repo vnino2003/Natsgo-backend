@@ -12,7 +12,6 @@ exports.getLiveAssignedBuses = async (req, res) => {
         b.bus_code      AS bus_code,
         b.plate_no      AS plate_no,
         b.capacity      AS capacity,
-        b.bus_status    AS bus_status,
         b.device_id     AS device_id,
 
         d.device_code   AS device_code,
@@ -99,8 +98,7 @@ exports.getLiveAssignedBuses = async (req, res) => {
 
         -- ✅ bus must be “okay/active”
         -- If your bus_status values are different, adjust this list.
-        AND LOWER(COALESCE(b.bus_status, 'active')) IN ('active', 'online', 'in_service')
-
+       
         -- ✅ must have coordinates
         AND g.lat IS NOT NULL
         AND g.lng IS NOT NULL

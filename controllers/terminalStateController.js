@@ -110,16 +110,14 @@ async function getTerminalStateSummary(req, res) {
   try {
     const [terms] = await db.execute(
       `SELECT terminal_id, terminal_name, city, lat, lng
-       FROM terminals
-       WHERE is_active = 1
-       ORDER BY terminal_id ASC`
+      FROM terminals
+ORDER BY terminal_id ASC`
     );
 
     const [counts] = await db.execute(
       `
       SELECT current_terminal_id, COUNT(*) AS bus_count
       FROM bus_terminal_state
-      WHERE at_terminal = 1
       GROUP BY current_terminal_id
       `
     );
@@ -205,7 +203,6 @@ async function recomputeTerminalState(req, res) {
     const [terminals] = await conn.execute(
       `SELECT terminal_id, lat, lng
        FROM terminals
-       WHERE is_active = 1
        ORDER BY terminal_id ASC`
     );
 
@@ -275,4 +272,5 @@ module.exports = {
   getTerminalStateSummary,
   getTerminalStateDevices,
   recomputeTerminalState,
+   updateOne,
 };

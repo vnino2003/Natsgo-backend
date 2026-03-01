@@ -10,6 +10,9 @@ const {
   createNotification,
 } = require("../services/notificationHelper");
 
+// ✅ import terminal-state updater (per telemetry)
+const { updateOne } = require("./terminalStateController");
+
 /* ================= Helpers ================= */
 function toNum(v) {
   if (v === null || v === undefined || v === "") return null;
@@ -57,7 +60,7 @@ function normalizeGpsState(v, { gpsEnabledVal, latNum, lngNum } = {}) {
         - resolve DEVICE_OFFLINE when telemetry returns + create DEVICE_ONLINE
         - upsert GPS_DISCONNECTED while disconnected
         - resolve GPS_DISCONNECTED when recovered + create GPS_ACTIVE/GPS_SEARCHING
-   - ❌ REMOVED: Terminal proximity + bus_terminal_state updates
+   - ✅ NEW: updates bus_terminal_state in real-time per telemetry (if lat/lng present)
 ========================================================= */
 async function postTelemetry(req, res) {
   const {
@@ -214,7 +217,6 @@ async function postTelemetry(req, res) {
 
     if (gpsEnabledVal === 1) {
       if (isDisconnected) {
-        // keep active alert while disconnected
         await upsertActiveAlert({
           conn,
           dedupe_key: gpsDiscKey,
@@ -229,7 +231,6 @@ async function postTelemetry(req, res) {
           meta: { gps_state: nextGpsState },
         });
       } else {
-        // recovered from disconnected
         if (wasDisconnected) {
           await resolveActiveAlert(gpsDiscKey, { conn });
 
@@ -257,7 +258,6 @@ async function postTelemetry(req, res) {
         }
       }
     } else {
-      // gps disabled: ensure we don't keep old alert
       if (wasDisconnected) {
         await resolveActiveAlert(gpsDiscKey, { conn });
       }
@@ -290,6 +290,38 @@ async function postTelemetry(req, res) {
           recorded_at || null,
         ]
       );
+    }
+
+    /* ===== 3.5) ✅ REAL-TIME terminal state update (per telemetry) ===== */
+    const shouldUpdateTerminalState =
+      deviceId &&
+      gpsEnabledVal === 1 &&
+      latNum !== null &&
+      lngNum !== null &&
+      nextGpsState !== "disabled"; // optional
+
+    if (shouldUpdateTerminalState) {
+    const [terminals] = await conn.execute(
+  `SELECT terminal_id, lat, lng
+   FROM terminals
+   ORDER BY terminal_id ASC`
+);
+
+      // your updateOne logic expects exactly 2 active terminals
+      if (terminals && terminals.length === 2) {
+        const arrivalM = Number(process.env.TERMINAL_ARRIVAL_M || 120);
+        const departM = Number(process.env.TERMINAL_DEPART_M || 180);
+
+        await updateOne({
+          conn,
+          deviceId,
+          lat: latNum,
+          lng: lngNum,
+          terminals,
+          arrivalM,
+          departM,
+        });
+      }
     }
 
     /* ===== 4) IR heartbeat + status upsert ===== */

@@ -12,10 +12,19 @@ function toFloat(v, fallback = null) {
 function cleanStr(v) {
   return String(v ?? "").trim();
 }
-function toTinyBool(v, fallback = 1) {
-  if (v === true || v === "true" || v === 1 || v === "1") return 1;
-  if (v === false || v === "false" || v === 0 || v === "0") return 0;
-  return fallback;
+function cleanTime(v) {
+  // expects "HH:MM" or "HH:MM:SS"
+  const s = cleanStr(v);
+  if (!s) return "";
+  // very light validation: 2 digits : 2 digits (: 2 digits optional)
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(s)) return "";
+  return s.length === 5 ? `${s}:00` : s; // normalize to HH:MM:SS
+}
+function timeToMinutes(t) {
+  // t = "HH:MM:SS"
+  const [hh, mm] = String(t).split(":").map((x) => Number(x));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return NaN;
+  return hh * 60 + mm;
 }
 
 /* =========================================================
@@ -33,13 +42,13 @@ async function getPublicTerminals(req, res) {
         t.city,
         t.lat,
         t.lng,
-        t.is_active,
+        t.available_from,
+        t.available_to,
         COUNT(bts.device_id) AS bus_count
       FROM terminals t
       LEFT JOIN bus_terminal_state bts
         ON bts.current_terminal_id = t.terminal_id
        AND bts.at_terminal = 1
-      WHERE t.is_active = 1
       GROUP BY t.terminal_id
       ORDER BY t.terminal_name ASC
       `
@@ -52,7 +61,8 @@ async function getPublicTerminals(req, res) {
         city: r.city,
         lat: Number(r.lat),
         lng: Number(r.lng),
-        is_active: Number(r.is_active) === 1,
+        available_from: r.available_from, // "HH:MM:SS"
+        available_to: r.available_to,     // "HH:MM:SS"
         bus_count: Number(r.bus_count ?? 0),
       }))
     );
@@ -66,10 +76,9 @@ async function getPublicTerminals(req, res) {
    ADMIN CRUD
    ========================================================= */
 
-// GET /api/admin/terminals?q=&active=1|0
+// GET /api/admin/terminals?q=
 async function getAdminTerminals(req, res) {
   const q = cleanStr(req.query.q).toLowerCase();
-  const active = req.query.active != null ? cleanStr(req.query.active) : "";
 
   try {
     const where = [];
@@ -82,11 +91,6 @@ async function getAdminTerminals(req, res) {
       params.push(`%${q}%`, `%${q}%`, `%${q}%`);
     }
 
-    if (active === "1" || active === "0") {
-      where.push("t.is_active = ?");
-      params.push(Number(active));
-    }
-
     const sql = `
       SELECT
         t.terminal_id,
@@ -94,7 +98,8 @@ async function getAdminTerminals(req, res) {
         t.city,
         t.lat,
         t.lng,
-        t.is_active,
+        t.available_from,
+        t.available_to,
         t.created_at,
         t.updated_at,
         COUNT(bts.device_id) AS bus_count
@@ -116,7 +121,8 @@ async function getAdminTerminals(req, res) {
         city: r.city,
         lat: Number(r.lat),
         lng: Number(r.lng),
-        is_active: Number(r.is_active), // keep 0/1 for admin UI
+        available_from: r.available_from,
+        available_to: r.available_to,
         bus_count: Number(r.bus_count ?? 0),
         created_at: r.created_at ?? null,
         updated_at: r.updated_at ?? null,
@@ -142,7 +148,8 @@ async function getTerminalById(req, res) {
         t.city,
         t.lat,
         t.lng,
-        t.is_active,
+        t.available_from,
+        t.available_to,
         t.created_at,
         t.updated_at,
         COUNT(bts.device_id) AS bus_count
@@ -166,7 +173,8 @@ async function getTerminalById(req, res) {
       city: r.city,
       lat: Number(r.lat),
       lng: Number(r.lng),
-      is_active: Number(r.is_active),
+      available_from: r.available_from,
+      available_to: r.available_to,
       bus_count: Number(r.bus_count ?? 0),
       created_at: r.created_at ?? null,
       updated_at: r.updated_at ?? null,
@@ -183,20 +191,39 @@ async function createTerminal(req, res) {
   const city = cleanStr(req.body.city);
   const lat = toFloat(req.body.lat);
   const lng = toFloat(req.body.lng);
-  const is_active = toTinyBool(req.body.is_active, 1);
+
+  // NEW
+  const available_from = cleanTime(req.body.available_from) || "05:00:00";
+  const available_to = cleanTime(req.body.available_to) || "22:00:00";
 
   if (!terminal_name) return res.status(400).json({ message: "terminal_name is required" });
   if (!city) return res.status(400).json({ message: "city is required" });
   if (lat == null || lat < -90 || lat > 90) return res.status(400).json({ message: "lat must be -90 to 90" });
   if (lng == null || lng < -180 || lng > 180) return res.status(400).json({ message: "lng must be -180 to 180" });
 
+  const fromMin = timeToMinutes(available_from);
+  const toMin = timeToMinutes(available_to);
+  if (!Number.isFinite(fromMin) || !Number.isFinite(toMin)) {
+    return res.status(400).json({ message: "available_from / available_to must be valid time (HH:MM)" });
+  }
+  if (fromMin >= toMin) {
+    return res.status(400).json({ message: "Available time invalid: 'from' must be earlier than 'to'." });
+  }
+
   try {
+    // ENFORCE MAX 2
+    const [cntRows] = await db.execute(`SELECT COUNT(*) AS c FROM terminals`);
+    const count = Number(cntRows?.[0]?.c ?? 0);
+    if (count >= 2) {
+      return res.status(409).json({ message: "Max terminals reached (2). Delete one before adding." });
+    }
+
     const [ins] = await db.execute(
       `
-      INSERT INTO terminals (terminal_name, city, lat, lng, is_active)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO terminals (terminal_name, city, lat, lng, available_from, available_to)
+      VALUES (?, ?, ?, ?, ?, ?)
       `,
-      [terminal_name, city, lat, lng, is_active]
+      [terminal_name, city, lat, lng, available_from, available_to]
     );
 
     return res.status(201).json({ message: "Terminal created", terminal_id: ins.insertId });
@@ -215,7 +242,10 @@ async function updateTerminal(req, res) {
   const city = req.body.city != null ? cleanStr(req.body.city) : null;
   const lat = req.body.lat != null ? toFloat(req.body.lat) : null;
   const lng = req.body.lng != null ? toFloat(req.body.lng) : null;
-  const is_active = req.body.is_active != null ? toTinyBool(req.body.is_active) : null;
+
+  // NEW
+  const available_from = req.body.available_from != null ? cleanTime(req.body.available_from) : null;
+  const available_to = req.body.available_to != null ? cleanTime(req.body.available_to) : null;
 
   if (lat != null && (lat < -90 || lat > 90)) return res.status(400).json({ message: "lat must be -90 to 90" });
   if (lng != null && (lng < -180 || lng > 180)) return res.status(400).json({ message: "lng must be -180 to 180" });
@@ -223,7 +253,34 @@ async function updateTerminal(req, res) {
   if (terminal_name !== null && !terminal_name) return res.status(400).json({ message: "terminal_name cannot be empty" });
   if (city !== null && !city) return res.status(400).json({ message: "city cannot be empty" });
 
+  if (available_from !== null && !available_from) {
+    return res.status(400).json({ message: "available_from must be valid time (HH:MM)" });
+  }
+  if (available_to !== null && !available_to) {
+    return res.status(400).json({ message: "available_to must be valid time (HH:MM)" });
+  }
+
+  // validate range if both provided (or fetch current if only one provided)
   try {
+    let finalFrom = available_from;
+    let finalTo = available_to;
+
+    if (finalFrom === null || finalTo === null) {
+      const [cur] = await db.execute(
+        `SELECT available_from, available_to FROM terminals WHERE terminal_id = ? LIMIT 1`,
+        [id]
+      );
+      if (!cur[0]) return res.status(404).json({ message: "Terminal not found" });
+      if (finalFrom === null) finalFrom = cur[0].available_from;
+      if (finalTo === null) finalTo = cur[0].available_to;
+    }
+
+    const fromMin = timeToMinutes(finalFrom);
+    const toMin = timeToMinutes(finalTo);
+    if (fromMin >= toMin) {
+      return res.status(400).json({ message: "Available time invalid: 'from' must be earlier than 'to'." });
+    }
+
     const [upd] = await db.execute(
       `
       UPDATE terminals
@@ -232,10 +289,11 @@ async function updateTerminal(req, res) {
         city = COALESCE(?, city),
         lat = COALESCE(?, lat),
         lng = COALESCE(?, lng),
-        is_active = COALESCE(?, is_active)
+        available_from = COALESCE(?, available_from),
+        available_to = COALESCE(?, available_to)
       WHERE terminal_id = ?
       `,
-      [terminal_name, city, lat, lng, is_active, id]
+      [terminal_name, city, lat, lng, available_from, available_to, id]
     );
 
     if (upd.affectedRows === 0) return res.status(404).json({ message: "Terminal not found" });

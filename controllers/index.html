@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Group Landing Page | Personal e-Profile</title>
+
+  <style>
+    :root{
+      --bg: #0b1020;
+      --card: rgba(255,255,255,.08);
+      --card2: rgba(255,255,255,.12);
+      --text: #eaf0ff;
+      --muted: rgba(234,240,255,.72);
+      --stroke: rgba(255,255,255,.12);
+      --shadow: 0 18px 50px rgba(0,0,0,.45);
+      --radius: 18px;
+      --accent1: #7c3aed; /* purple */
+      --accent2: #22c55e; /* green */
+      --accent3: #38bdf8; /* sky */
+    }
+
+    *{ box-sizing: border-box; }
+    html, body{ height: 100%; }
+    body{
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 20% 10%, rgba(124,58,237,.35), transparent 60%),
+        radial-gradient(1000px 600px at 85% 30%, rgba(56,189,248,.25), transparent 55%),
+        radial-gradient(900px 500px at 60% 90%, rgba(34,197,94,.18), transparent 55%),
+        linear-gradient(180deg, #070a14, var(--bg));
+      overflow-x: hidden;
+    }
+
+    /* ======= Layout shell ======= */
+    .shell{
+      width: min(1150px, 92vw);
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    /* ======= Top bar ======= */
+    .topbar{
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 14px 0;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(11,16,32,.65), rgba(11,16,32,.15));
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .topbar-inner{
+      width: min(1150px, 92vw);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .brand{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo{
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 30% 30%, rgba(255,255,255,.2), transparent 55%),
+        linear-gradient(135deg, rgba(124,58,237,.9), rgba(56,189,248,.9));
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .brand h1{
+      font-size: 14px;
+      margin: 0;
+      letter-spacing: .4px;
+      font-weight: 700;
+    }
+    .brand p{
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .actions{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .pill{
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    }
+    .pill:hover{
+      transform: translateY(-1px);
+      background: rgba(255,255,255,.10);
+      border-color: rgba(255,255,255,.18);
+    }
+
+    /* ======= Hero ======= */
+    .hero{
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: 1.3fr .7fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+    @media (max-width: 900px){
+      .hero{ grid-template-columns: 1fr; }
+    }
+
+    .hero-card{
+      border: 1px solid rgba(255,255,255,.10);
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-card::before{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      background: radial-gradient(500px 220px at 25% 0%, rgba(124,58,237,.25), transparent 60%);
+      pointer-events:none;
+    }
+
+    .kicker{
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      padding: 7px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .dot{
+      width: 8px; height: 8px; border-radius: 50%;
+      background: linear-gradient(135deg, rgba(124,58,237,1), rgba(56,189,248,1));
+      box-shadow: 0 0 0 4px rgba(124,58,237,.18);
+    }
+
+    .hero-title{
+      margin: 0;
+      font-size: clamp(22px, 3vw, 34px);
+      letter-spacing: .2px;
+      line-height: 1.15;
+      position: relative;
+    }
+    .hero-sub{
+      margin: 10px 0 0;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
+      position: relative;
+      max-width: 65ch;
+    }
+
+    .hero-metrics{
+      margin-top: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      position: relative;
+    }
+    .metric{
+      flex: 1;
+      min-width: 160px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      border-radius: 14px;
+      padding: 12px 12px;
+    }
+    .metric .label{ font-size: 12px; color: var(--muted); }
+    .metric .value{ font-size: 16px; font-weight: 800; margin-top: 4px; }
+
+    /* ======= Sidebar card ======= */
+    .info-card{
+      border: 1px solid rgba(255,255,255,.10);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+    .info-card h3{ margin: 0 0 10px; font-size: 14px; letter-spacing: .2px; }
+    .info-list{
+      margin: 0; padding: 0; list-style: none;
+      display: grid; gap: 10px;
+    }
+    .info-item{
+      display: flex; gap: 10px; align-items: flex-start;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.05);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .badge{
+      width: 34px; height: 34px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.07);
+      display: grid; place-items: center;
+      flex: 0 0 34px;
+      font-weight: 800;
+    }
+    .info-item p{
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    /* ======= Members section ======= */
+    .section{
+      margin-top: 22px;
+    }
+    .section-head{
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .section-head h2{
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+    .section-head p{
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .grid{
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+    .member-card{
+      grid-column: span 4;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+      min-height: 240px;
+    }
+    .member-card:hover{
+      transform: translateY(-3px);
+      border-color: rgba(255,255,255,.18);
+      background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
+    }
+    @media (max-width: 980px){
+      .member-card{ grid-column: span 6; }
+    }
+    @media (max-width: 620px){
+      .member-card{ grid-column: span 12; }
+    }
+
+    .cover{
+      height: 92px;
+      background:
+        radial-gradient(280px 100px at 20% 10%, rgba(255,255,255,.18), transparent 60%),
+        linear-gradient(135deg, rgba(124,58,237,.85), rgba(56,189,248,.85));
+      position: relative;
+    }
+    .cover.alt2{
+      background:
+        radial-gradient(280px 100px at 20% 10%, rgba(255,255,255,.18), transparent 60%),
+        linear-gradient(135deg, rgba(34,197,94,.85), rgba(56,189,248,.85));
+    }
+    .cover.alt3{
+      background:
+        radial-gradient(280px 100px at 20% 10%, rgba(255,255,255,.18), transparent 60%),
+        linear-gradient(135deg, rgba(251,146,60,.85), rgba(124,58,237,.85));
+    }
+
+    .avatar{
+      width: 76px; height: 76px;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.25);
+      backdrop-filter: blur(6px);
+      position: absolute;
+      left: 16px;
+      bottom: -38px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0,0,0,.35);
+    }
+    .avatar img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .avatar .initials{
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: .5px;
+      color: rgba(255,255,255,.92);
+    }
+
+    .member-body{
+      padding: 52px 16px 16px;
+    }
+    .member-name{
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: .2px;
+      font-weight: 900;
+    }
+    .member-role{
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .member-desc{
+      margin: 12px 0 0;
+      color: rgba(234,240,255,.78);
+      font-size: 13px;
+      line-height: 1.55;
+      min-height: 44px;
+    }
+
+    .chips{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .chip{
+      font-size: 11px;
+      color: rgba(234,240,255,.85);
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .member-foot{
+      margin-top: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .btn{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.07);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 700;
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover{
+      transform: translateY(-1px);
+      background: rgba(255,255,255,.11);
+      border-color: rgba(255,255,255,.18);
+    }
+    .btn.primary{
+      border-color: rgba(124,58,237,.35);
+      background: linear-gradient(135deg, rgba(124,58,237,.75), rgba(56,189,248,.65));
+    }
+    .btn.primary:hover{
+      border-color: rgba(124,58,237,.55);
+      background: linear-gradient(135deg, rgba(124,58,237,.85), rgba(56,189,248,.72));
+    }
+    .small{
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* ======= Footer ======= */
+    footer{
+      margin-top: 28px;
+      border-top: 1px solid rgba(255,255,255,.08);
+      padding-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Sticky top bar -->
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>Centralized Landing Page</h1>
+          <p>Personal e-Profile Webpage</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a class="pill" href="#members">👥 Members</a>
+        <a class="pill" href="#about">✨ About</a>
+        <a class="pill" href="#contact">📩 Contact</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="shell">
+    <!-- HERO -->
+    <section class="hero" id="about">
+      <div class="hero-card">
+        <div class="kicker"><span class="dot"></span> Group e-Profile Hub</div>
+        <h2 class="hero-title">Meet our team and explore each member’s Personal e-Profile</h2>
+        <p class="hero-sub">
+          This page represents our group’s identity and serves as the gateway to each member’s
+          individual profile (achievements, background, and goals).
+        </p>
+
+        <div class="hero-metrics">
+          <div class="metric">
+            <div class="label">Project</div>
+            <div class="value">Personal e-Profile Webpage</div>
+          </div>
+          <div class="metric">
+            <div class="label">Focus</div>
+            <div class="value">HTML • CSS • UI Layout</div>
+          </div>
+          <div class="metric">
+            <div class="label">Goal</div>
+            <div class="value">Clean design + easy navigation</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="info-card" id="contact">
+        <h3>Quick Notes</h3>
+        <ul class="info-list">
+          <li class="info-item">
+            <div class="badge">1</div>
+            <p>Click a member card to open their e-profile page.</p>
+          </li>
+          <li class="info-item">
+            <div class="badge">2</div>
+            <p>Each member page should include a <b>“Back to Home”</b> link to return here.</p>
+          </li>
+          <li class="info-item">
+            <div class="badge">3</div>
+            <p>Replace images + text with your real content (roles, goals, achievements).</p>
+          </li>
+        </ul>
+      </aside>
+    </section>
+
+    <!-- MEMBERS -->
+    <section class="section" id="members">
+      <div class="section-head">
+        <div>
+          <h2>Team Members</h2>
+          <p>Preview cards — click “View Profile” to open their personal page.</p>
+        </div>
+        <div class="small">Tip: Put member pages in the same folder (e.g., member1.html)</div>
+      </div>
+
+      <div class="grid">
+        <!-- MEMBER 1 -->
+        <article class="member-card">
+          <div class="cover">
+            <div class="avatar" title="Profile photo">
+              <!-- Option A: Put image -->
+              <!-- <img src="images/member1.jpg" alt="Member 1 photo"> -->
+
+              <!-- Option B: Initials fallback -->
+              <div class="initials">AB</div>
+            </div>
+          </div>
+
+          <div class="member-body">
+            <h3 class="member-name">Member Name 1</h3>
+            <p class="member-role">Role / Specialty (e.g., Front-end • Designer)</p>
+
+            <p class="member-desc">
+              Short preview: achievements or goals (1–2 lines). Make it catchy but simple.
+            </p>
+
+            <div class="chips">
+              <span class="chip">Creative</span>
+              <span class="chip">Teamwork</span>
+              <span class="chip">UI</span>
+            </div>
+
+            <div class="member-foot">
+              <a class="btn primary" href="member1.html">View Profile</a>
+              <span class="small">Updated: 2026</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- MEMBER 2 -->
+        <article class="member-card">
+          <div class="cover alt2">
+            <div class="avatar">
+              <div class="initials">CD</div>
+            </div>
+          </div>
+
+          <div class="member-body">
+            <h3 class="member-name">Member Name 2</h3>
+            <p class="member-role">Role / Specialty (e.g., Research • Content)</p>
+
+            <p class="member-desc">
+              Short preview: background + what you’re aiming for as a student.
+            </p>
+
+            <div class="chips">
+              <span class="chip">Leadership</span>
+              <span class="chip">Writing</span>
+              <span class="chip">Growth</span>
+            </div>
+
+            <div class="member-foot">
+              <a class="btn primary" href="member2.html">View Profile</a>
+              <span class="small">Updated: 2026</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- MEMBER 3 -->
+        <article class="member-card">
+          <div class="cover alt3">
+            <div class="avatar">
+              <div class="initials">EF</div>
+            </div>
+          </div>
+
+          <div class="member-body">
+            <h3 class="member-name">Member Name 3</h3>
+            <p class="member-role">Role / Specialty (e.g., Back-end • Logic)</p>
+
+            <p class="member-desc">
+              Short preview: strongest skills + 1 highlight (award / project / org).
+            </p>
+
+            <div class="chips">
+              <span class="chip">Problem Solving</span>
+              <span class="chip">Coding</span>
+              <span class="chip">Discipline</span>
+            </div>
+
+            <div class="member-foot">
+              <a class="btn primary" href="member3.html">View Profile</a>
+              <span class="small">Updated: 2026</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Add more cards by copying one of the blocks above -->
+      </div>
+    </section>
+
+    <footer>
+      <div>© 2026 • Group Landing Page</div>
+      <div>Made with HTML + CSS • Modern card layout</div>
+    </footer>
+  </main>
+</body>
+</html>
