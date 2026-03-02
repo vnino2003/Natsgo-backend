@@ -189,8 +189,8 @@ async function getTerminalStateDevices(req, res) {
    - recompute bus_terminal_state for ALL devices using latest gps_logs
 ========================================================= */
 async function recomputeTerminalState(req, res) {
-  const arrivalM = toNum(req.body?.arrival_m) ?? 120;
-  const departM = toNum(req.body?.depart_m) ?? 180;
+  const arrivalM = toNum(req.body?.arrival_m) ?? 60;
+  const departM = toNum(req.body?.depart_m) ?? 80;
 
   if (arrivalM <= 0 || departM <= 0 || departM < arrivalM) {
     return res.status(400).json({ message: "Invalid arrival/depart radius values" });
