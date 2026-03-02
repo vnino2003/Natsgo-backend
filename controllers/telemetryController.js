@@ -309,8 +309,8 @@ async function postTelemetry(req, res) {
 
       // your updateOne logic expects exactly 2 active terminals
       if (terminals && terminals.length === 2) {
-        const arrivalM = Number(process.env.TERMINAL_ARRIVAL_M || 120);
-        const departM = Number(process.env.TERMINAL_DEPART_M || 180);
+        const arrivalM = Number(process.env.TERMINAL_ARRIVAL_M || 60);
+        const departM = Number(process.env.TERMINAL_DEPART_M || 80);
 
         await updateOne({
           conn,
